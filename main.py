@@ -57,7 +57,7 @@ def calculate_stress_level(emotions):
     elif avg_stress >= 0.2:
         description = "Low Stress"
     else:
-        description = "Very Low Stress"
+        description = "You are stress free"
     
     return avg_stress, description
 
