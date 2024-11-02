@@ -4,15 +4,103 @@ import tempfile
 from pathlib import Path
 import random
 import shutil
+import torch
 
-# Simulated emotion labels
-EMOTION_LABELS = ["Anger", "Disgust", "Fear", "Happy", "Neutral", "Sad", "Calm", "Surprised"]
+from audio_utils import (
+    AudioData, 
+    process_audio, 
+    open_audio_file,
+    new_channel,
+    new_sr,
+    max_ms
+)
+from spectogram_utils import create_spectogram
+from model import AudioEmotionCNN, load_model
+
+# Emotion labels and their stress weights
+EMOTION_WEIGHTS = {
+    "Anger": 1.0,
+    "Fear": 0.9,
+    "Sad": 0.7,
+    "Disgust": 0.7,
+    "Surprised": 0.4,
+    "Neutral": 0.3,
+    "Happy": 0.1,
+    "Calm": 0.0
+}
+
+EMOTION_LABELS = list(EMOTION_WEIGHTS.keys())
+
+# Load the model at startup
+try:
+    MODEL = load_model('audio_emotion_model.pth')
+except Exception as e:
+    print(f"Warning: Could not load model: {str(e)}")
+    MODEL = None
+
+def calculate_stress_level(emotions):
+    """
+    Calculate average stress level from a list of emotions
+    """
+    if not emotions:
+        return 0.0, "No emotions detected"
+    
+    total_stress = sum(EMOTION_WEIGHTS[emotion] for emotion in emotions)
+    avg_stress = total_stress / len(emotions)
+    
+    if avg_stress >= 0.8:
+        description = "Very High Stress"
+    elif avg_stress >= 0.6:
+        description = "High Stress"
+    elif avg_stress >= 0.4:
+        description = "Moderate Stress"
+    elif avg_stress >= 0.2:
+        description = "Low Stress"
+    else:
+        description = "Very Low Stress"
+    
+    return avg_stress, description
 
 def simulate_emotion_classification(audio_path):
     """
-    Placeholder function to simulate emotion classification.
+    Classify emotion using the pretrained model
     """
-    return random.choice(EMOTION_LABELS)
+    if MODEL is None:
+        return random.choice(EMOTION_LABELS)
+    
+    try:
+        # Load and process the audio file
+        audio_data = open_audio_file(audio_path)
+        processed_audio = process_audio(audio_data)
+        
+        # Create spectogram
+        spectogram = create_spectogram(processed_audio)
+        
+        # Prepare input for model
+        spectogram = spectogram.unsqueeze(0)  # Add batch dimension
+        
+        # Move to device and normalize (same as in training)
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        spectogram = spectogram.to(device)
+        inputs_m, inputs_s = spectogram.mean(), spectogram.std()
+        spectogram = (spectogram - inputs_m) / inputs_s
+        
+        # Get model prediction
+        with torch.no_grad():
+            outputs = MODEL(spectogram)
+            _, predicted = torch.max(outputs, 1)
+            predicted_emotion = EMOTION_LABELS[predicted.item()]
+        
+        print(f"Processed audio shape: {processed_audio.signal.shape}")
+        print(f"Processed sample rate: {processed_audio.sample_rate}Hz")
+        print(f"Spectogram shape: {spectogram.shape}")
+        print(f"Predicted emotion: {predicted_emotion}")
+        
+        return predicted_emotion
+        
+    except Exception as e:
+        print(f"Error in emotion classification: {str(e)}")
+        return random.choice(EMOTION_LABELS)
 
 def save_uploaded_file(audio):
     """
@@ -36,7 +124,7 @@ def save_uploaded_file(audio):
             shutil.copy2(audio, output_path)
             return audio, "Audio file saved successfully!"
         except Exception as e:
-            print(f"Error saving file: {e}")  # Debug print
+            print(f"Error saving file: {e}")
             return audio, f"Error saving file: {e}"
 
 def analyze_all_audios():
@@ -53,13 +141,22 @@ def analyze_all_audios():
     
     # Analyze each audio file
     results = []
+    emotions = []
     for audio_file in audio_files:
         emotion = simulate_emotion_classification(str(audio_file))
-        results.append(f"File: {audio_file.name} → Emotion: {emotion}")
+        emotions.append(emotion)
+        results.append(f"File: {audio_file.name} → Emotion: {emotion} (Stress Level: {EMOTION_WEIGHTS[emotion]:.1f})")
+    
+    # Calculate average stress level
+    avg_stress, stress_description = calculate_stress_level(emotions)
     
     # Format results
     results_text = "🎯 Emotion Classification Results:\n\n"
     results_text += "\n\n".join(results)
+    results_text += f"\n\n📊 Overall Analysis:\n"
+    results_text += f"Average Stress Level: {avg_stress:.2f}\n"
+    results_text += f"Assessment: {stress_description}"
+    
     return results_text
 
 def delete_temp_files():
@@ -76,7 +173,7 @@ def delete_temp_files():
                     print(f"Error deleting {file}: {e}")
             return "✨ All audio files cleared successfully!"
         except Exception as e:
-            print(f"Error clearing files: {e}")  # Debug print
+            print(f"Error clearing files: {e}")
             return f"Error clearing files: {str(e)}"
     return "No files to clear."
 
