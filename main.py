@@ -5,6 +5,7 @@ from pathlib import Path
 import random
 import shutil
 import torch
+from typing import Dict
 
 from audio_utils import (
     AudioData, 
@@ -38,6 +39,9 @@ except Exception as e:
     print(f"Warning: Could not load model: {str(e)}")
     MODEL = None
 
+# Dictionary to store analyzed results
+ANALYZED_FILES: Dict[str, str] = {}
+
 def calculate_stress_level(emotions):
     """
     Calculate average stress level from a list of emotions
@@ -65,8 +69,9 @@ def simulate_emotion_classification(audio_path):
     """
     Classify emotion using the pretrained model
     """
-    if MODEL is None:
-        return random.choice(EMOTION_LABELS)
+    # Check if file was already analyzed
+    if audio_path in ANALYZED_FILES:
+        return ANALYZED_FILES[audio_path]
     
     try:
         # Load and process the audio file
@@ -91,6 +96,9 @@ def simulate_emotion_classification(audio_path):
             _, predicted = torch.max(outputs, 1)
             predicted_emotion = EMOTION_LABELS[predicted.item()]
         
+        # Store the result
+        ANALYZED_FILES[audio_path] = predicted_emotion
+        
         print(f"Processed audio shape: {processed_audio.signal.shape}")
         print(f"Processed sample rate: {processed_audio.sample_rate}Hz")
         print(f"Spectogram shape: {spectogram.shape}")
@@ -100,7 +108,9 @@ def simulate_emotion_classification(audio_path):
         
     except Exception as e:
         print(f"Error in emotion classification: {str(e)}")
-        return random.choice(EMOTION_LABELS)
+        emotion = random.choice(EMOTION_LABELS)
+        ANALYZED_FILES[audio_path] = emotion
+        return emotion
 
 def save_uploaded_file(audio):
     """
@@ -161,7 +171,7 @@ def analyze_all_audios():
 
 def delete_temp_files():
     """
-    Delete all audio files from the temp directory
+    Delete all audio files from the temp directory and clear analysis results
     """
     temp_dir = Path(tempfile.gettempdir()) / "audio_uploads"
     if temp_dir.exists():
@@ -169,6 +179,9 @@ def delete_temp_files():
             for file in temp_dir.glob("*.wav"):
                 try:
                     file.unlink()
+                    # Remove file from analyzed results if it exists
+                    if str(file) in ANALYZED_FILES:
+                        del ANALYZED_FILES[str(file)]
                 except Exception as e:
                     print(f"Error deleting {file}: {e}")
             return "✨ All audio files cleared successfully!"
